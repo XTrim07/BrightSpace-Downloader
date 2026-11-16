@@ -31,6 +31,8 @@ export interface Manifest {
   files: Record<string, ManifestFile>;
   /** keyed by course code */
   courses: Record<string, CourseHome>;
+  /** Brightspace user this vault is synced for; a different user is refused */
+  owner?: string;
 }
 
 export const emptyManifest = (): Manifest => ({ version: 1, files: {}, courses: {} });
@@ -40,7 +42,7 @@ export async function loadManifest(fs: VaultFS): Promise<Manifest> {
   if (!text) return emptyManifest();
   try {
     const m = JSON.parse(text);
-    return { version: 1, files: m.files ?? {}, courses: m.courses ?? {} };
+    return { version: 1, files: m.files ?? {}, courses: m.courses ?? {}, owner: m.owner };
   } catch {
     return emptyManifest();
   }
@@ -295,12 +297,21 @@ export async function lastSync(fs: VaultFS): Promise<SyncLog | null> {
   for (const name of names.sort().reverse()) {
     try {
       const log = JSON.parse((await fs.readText(`${STATE_DIR}/logs/${name}`)) || '') as SyncLog;
-      if (!log.undone) return log;
+      // Old backups are pruned: a sync can only be undone while its backup exists.
+      if (!log.undone && (await fs.stat(`${STATE_DIR}/backups/${log.ts}/manifest.prev.json`))) return log;
     } catch {
       /* unreadable log: skip */
     }
   }
   return null;
+}
+
+/** Keep the backups of the last few syncs only, so they never pile up. */
+export async function pruneBackups(fs: VaultFS, keep = 3): Promise<void> {
+  const dirs = (await fs.listDirs(`${STATE_DIR}/backups`)).sort();
+  for (const dir of dirs.slice(0, Math.max(0, dirs.length - keep))) {
+    await fs.removeTree(`${STATE_DIR}/backups/${dir}`);
+  }
 }
 
 export interface UndoResult {

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Obsidian sync · BrightSpace Downloader</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v11m0 0l-4.5-4.5M12 14l4.5-4.5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+          fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <h1>BrightSpace Downloader <span>· Obsidian sync</span></h1>
+      <div id="session" class="pill">Checking Brightspace…</div>
+    </header>
+
+    <main>
+      <div id="notice" hidden></div>
+
+      <section>
+        <h2><span class="step">1</span> Obsidian vault</h2>
+        <p class="hint">The folder of your vault on this computer (the one that contains <code>.obsidian</code>). You pick it once.</p>
+        <div class="row">
+          <button id="choose">Choose vault folder</button>
+          <span id="vault-status" class="status"></span>
+        </div>
+      </section>
+
+      <section>
+        <div class="head">
+          <h2><span class="step">2</span> Courses to keep in sync</h2>
+          <button id="courses-all" class="link">Select all</button>
+          <button id="courses-none" class="link">Clear</button>
+        </div>
+        <p class="hint">Everything in these courses is kept up to date in the vault: slides, documents, pages, links, announcements, assignments and grades. Video and audio files are not copied; they stay links to Brightspace.</p>
+        <div id="course-list" class="list"><div class="empty">Loading your courses…</div></div>
+      </section>
+
+      <details id="advanced">
+        <summary>Advanced</summary>
+        <div class="grid">
+          <label>Folder in the vault <input id="out-name" type="text" /></label>
+          <label>Root note <input id="virt-root" type="text" /></label>
+          <label class="check"><input id="virt-folder" type="checkbox" /> VirtFolder links (<code>Folders:</code> in every note)</label>
+          <label class="check"><input id="hubs" type="checkbox" /> Course hub notes in <code>Courses/</code> (your own notes go there)</label>
+        </div>
+      </details>
+
+      <section>
+        <div class="row">
+          <button id="sync" class="primary" disabled>Sync now</button>
+          <button id="undo" disabled>Undo last sync</button>
+          <span id="last" class="hint"></span>
+        </div>
+        <progress id="progress" hidden></progress>
+        <div id="stage" class="status"></div>
+        <div id="result"></div>
+      </section>
+
+      <pre id="log"></pre>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

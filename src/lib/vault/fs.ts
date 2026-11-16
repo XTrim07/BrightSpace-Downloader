@@ -15,6 +15,8 @@ export interface VaultFS {
   write(path: string, data: string | Uint8Array | ReadableStream<Uint8Array>): Promise<void>;
   copy(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
+  /** delete a directory and everything in it (no-op when missing) */
+  removeTree(dir: string): Promise<void>;
   /** file names directly inside dir (no recursion); [] when dir is missing */
   listFiles(dir: string): Promise<string[]>;
   /** subdirectory names directly inside dir; [] when dir is missing */
@@ -117,6 +119,19 @@ export class HandleFS implements VaultFS {
     }
   }
 
+  async removeTree(dir: string): Promise<void> {
+    const parts = split(dir);
+    const name = parts.pop();
+    if (!name) return; // never the vault root
+    const d = await this.dir(parts, false);
+    if (!d) return;
+    try {
+      await d.removeEntry(name, { recursive: true });
+    } catch (ex) {
+      if ((ex as DOMException).name !== 'NotFoundError') throw ex;
+    }
+  }
+
   private async list(dir: string, kind: 'file' | 'directory'): Promise<string[]> {
     const d = await this.dir(split(dir), false);
     if (!d) return [];
@@ -174,6 +189,11 @@ export class MemoryFS implements VaultFS {
 
   async remove(path: string): Promise<void> {
     this.files.delete(path);
+  }
+
+  async removeTree(dir: string): Promise<void> {
+    const prefix = `${dir.replace(/\/$/, '')}/`;
+    for (const path of [...this.files.keys()]) if (path.startsWith(prefix)) this.files.delete(path);
   }
 
   private children(dir: string): { files: Set<string>; dirs: Set<string> } {

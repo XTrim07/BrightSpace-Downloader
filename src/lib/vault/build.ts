@@ -10,7 +10,7 @@
 
 import { htmlToMd } from '../htmlmd';
 import type { ScannedCourse, Selection, TreeNode } from '../model';
-import { filterTree } from '../model';
+import { categoryOf, filterTree } from '../model';
 import { TEXT_CAP } from '../scan';
 import { cmpStr, label, sanitize, shortDate, stripChars } from '../util';
 import { BASE } from '../valence';
@@ -31,6 +31,8 @@ export interface BuildOptions {
   virtFolder: boolean;
   /** vault-side note the top note nests under, e.g. "! Index" ('' = none) */
   virtRoot: string;
+  /** video/audio files are not copied: they stay a link back to Brightspace */
+  skipMedia?: boolean;
 }
 
 export interface CourseHome {
@@ -67,6 +69,24 @@ function mocLine(e: Entry): string {
   return e[0] === 'bare' ? `- [${label(e[2])}](${e[1]})` : `- ${wl(e[1], e[2])}`;
 }
 
+/**
+ * Brightspace descriptions sometimes nest a markdown link inside wikilink
+ * brackets, e.g. `[[PDF](https://example.org/x.pdf)]`. Obsidian reads the
+ * leading `[[PDF]]` as a broken wikilink, so it becomes `[PDF](url)`.
+ */
+export function normalizeLinks(text: string): string {
+  return (text || '').replace(/\[\[([^\[\]\n]+?)\]\((.+?)\)\]/g, '[$1]($2)');
+}
+
+/** Video/audio file topics become "locked" entries: a bare link to the Brightspace viewer. */
+function mediaAsLinks(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.kind === 'module') return { ...node, children: mediaAsLinks(node.children || []) };
+    if (categoryOf(node) === 'videos') return { ...node, kind: 'locked' as const, reason: 'Media file: open it on Brightspace.' };
+    return node;
+  });
+}
+
 export function mocNote(
   title: string, upTarget: string, brightspaceId: number | string, code: string,
   contents: string, entries: Entry[], virtFolder: boolean,
@@ -77,7 +97,8 @@ export function mocNote(
     tagsLine(['brightspace']), `course_code: ${code}`, `brightspace_id: ${brightspaceId}`,
     '---', AUTO_TAG.trim(), '', `# ${label(title)}`, '', AUTO_START,
   );
-  if ((contents || '').trim()) lines.push('## Contents', '', contents.trim(), '');
+  const body = normalizeLinks(contents || '').trim();
+  if (body) lines.push('## Contents', '', body, '');
   if (entries.length) lines.push('## MOC', '', ...entries.map(mocLine));
   lines.push(AUTO_END);
   return lines.join('\n').replace(/\s+$/, '') + '\n';
@@ -148,7 +169,8 @@ class CourseBuilder {
     if (node.kind === 'file') {
       const rel = `${this.vname}/${node.path}`;
       // PDFs and other binaries are linked, never converted to text.
-      const text = node.bytes ? (node.text || '').trim().slice(0, TEXT_CAP) : '';
+      // Only text files and slide decks carry extracted text (see scan.hydrate).
+      const text = (node.text || '').trim().slice(0, TEXT_CAP);
       const body = [desc, text].filter(Boolean).join('\n\n');
       if (body) {
         const stem = this.noteStem(dir, title);
@@ -338,7 +360,8 @@ export function buildVault(courses: ScannedCourse[], sel: Selection, opts: Build
   const used = new Map<string, Set<string>>();
   for (const sc of courses) {
     const vname = courseVaultName(sc.course.name, sc.code);
-    const tree = filterTree(sc.course.id, sc.tree, sel);
+    const visible = filterTree(sc.course.id, sc.tree, sel);
+    const tree = opts.skipMedia ? mediaAsLinks(visible) : visible;
     const b = new CourseBuilder(sc, vname, opts, used);
     b.placeFiles(tree);
     const home = `${vname}/${vname}`;

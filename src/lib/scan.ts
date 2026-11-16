@@ -5,6 +5,7 @@
  */
 
 import { htmlToMd } from './htmlmd';
+import { pptxText } from './pptx';
 import type { Course, ScannedCourse, TreeNode } from './model';
 import { walkTree } from './model';
 import { sanitize } from './util';
@@ -88,6 +89,7 @@ export function normalizeToc(modules: any[]): any[] {
           Url: t.Url,
           LastModifiedDate: t.LastModifiedDate,
           Description: t.Description,
+          _toc: true,
         },
       })),
     ];
@@ -98,6 +100,7 @@ export function normalizeToc(modules: any[]): any[] {
       Type: 0,
       LastModifiedDate: m.LastModifiedDate,
       Description: m.Description,
+      _toc: true,
       _kids: kids.map((k) => k.n),
     };
   });
@@ -128,6 +131,8 @@ class Scanner {
   private async desc(kind: 'modules' | 'topics', node: any, owner: string): Promise<string> {
     const emb = node.Description || {};
     if (emb.Html || emb.Text) return descOf(node);
+    // The table of contents already carries descriptions: an empty one is final.
+    if (node._toc && node.Description !== undefined) return '';
     if (this.fast) return '';
     const key = `${owner}@${node.LastModifiedDate || ''}`;
     if (key in this.state.descs) return this.state.descs[key];
@@ -259,14 +264,15 @@ export async function scanCourse(
   course: Course,
   state: ScanState,
   onProgress: (msg: string) => void = () => {},
-  opts: { fast?: boolean } = {},
+  /** fast: tree only, one request. toc: tree from the table of contents, full details. */
+  opts: { fast?: boolean; toc?: boolean } = {},
 ): Promise<ScannedCourse> {
   const code = sanitize(course.code || `course-${course.id}`, 80);
   const scanner = new Scanner(api, course.id, state, onProgress, !!opts.fast);
   const base = `/d2l/api/le/${LE_VER}/${course.id}`;
   let toc: any = null;
   let roots: any[] | null = null;
-  if (opts.fast) {
+  if (opts.fast || opts.toc) {
     // One request for the whole tree; fall back to the module-by-module walk.
     try {
       toc = await api.get(`${base}/content/toc`);
@@ -341,34 +347,66 @@ export async function loadExtras(
   }
 }
 
+/** Text pulled out of pages/files, remembered so unchanged topics are not fetched again. */
+export type TextCache = Record<string, { lm: string; text: string }>;
+
+const PPTX_MAX_BYTES = 40 * 1024 * 1024;
+/** Freshly fetched files up to this size are kept in memory and written without a second download. */
+const KEEP_BYTES = 10 * 1024 * 1024;
+
+function extOfName(name: string): string {
+  const i = name.lastIndexOf('.');
+  return i > 0 ? name.slice(i).toLowerCase() : '';
+}
+
 /**
- * Fetch the small payloads the vault notes are built from: HTML pages and
- * plain-text files. Binary files are never loaded here.
+ * Fetch the payloads the vault notes are built from: HTML pages, plain-text
+ * files and the slide text of .pptx decks. PDFs and other binaries are never
+ * loaded here. With a cache, only new or changed topics are fetched.
  */
 export async function hydrate(
   api: Api,
   courseId: number,
   tree: TreeNode[],
   onProgress: (msg: string) => void = () => {},
+  cache?: TextCache,
 ): Promise<string[]> {
   const errors: string[] = [];
   for (const node of walkTree(tree)) {
-    const name = (node.name || '').toLowerCase();
-    const i = name.lastIndexOf('.');
-    const isText = node.kind === 'file' && i > 0 && TEXT_EXTS.has(name.slice(i));
-    if (!(node.kind === 'page' || isText) || node.text !== undefined) continue;
+    const ext = extOfName(node.name || '');
+    const isText = node.kind === 'file' && TEXT_EXTS.has(ext);
+    const isPptx = node.kind === 'file' && ext === '.pptx';
+    if (!(node.kind === 'page' || isText || isPptx) || node.text !== undefined) continue;
+    const key = `${courseId}:${node.id}`;
+    const lm = node.lastModified || '';
+    const hit = cache?.[key];
+    if (hit && lm && hit.lm === lm) {
+      node.text = hit.text;
+      continue;
+    }
     onProgress(node.title);
     try {
       const res = await api.fetchFile(courseId, node.id);
       const len = Number(res.headers.get('content-length')) || 0;
-      if (!res.ok || len > HYDRATE_MAX_BYTES) {
+      if (!res.ok || len > (isPptx ? PPTX_MAX_BYTES : HYDRATE_MAX_BYTES)) {
         await res.body?.cancel().catch(() => {});
         if (!res.ok) errors.push(`${node.title}: http-${res.status}`);
+        else if (cache) cache[key] = { lm, text: '' }; // too large to read: link the file only
         continue;
       }
       const bytes = new Uint8Array(await res.arrayBuffer());
-      node.text = new TextDecoder('utf-8').decode(bytes);
-      if (isText) node.bytes = bytes;
+      if (isPptx) {
+        try {
+          node.text = pptxText(bytes).slice(0, TEXT_CAP);
+        } catch {
+          node.text = '';
+        }
+      } else {
+        node.text = new TextDecoder('utf-8').decode(bytes);
+        if (isText) node.text = node.text.trim().slice(0, TEXT_CAP);
+      }
+      if (node.kind === 'file' && bytes.length <= KEEP_BYTES) node.bytes = bytes;
+      if (cache) cache[key] = { lm, text: node.text };
     } catch (ex) {
       if (ex instanceof AuthExpiredError) throw ex;
       errors.push(`${node.title}: ${(ex as Error).message}`);

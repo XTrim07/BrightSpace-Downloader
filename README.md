@@ -64,15 +64,68 @@ CSE11C Computer Organisation (2026-27 Q1)/
 
 ## Obsidian
 
-*Obsidian vault sync ↗* at the bottom of the popup opens a separate tab for
-writing a course into an Obsidian vault (preview, backup, undo). It works
-independently of the zip download and is not the current focus.
+**Export to Obsidian** keeps a copy of your courses up to date inside an
+Obsidian vault, in the layout of
+[CSE-vault-sync](https://github.com/vVic1029v/CSE-vault-sync). The sync
+runs in its own tab (a popup closes as soon as it loses focus).
+
+**Set up once.** The first press of *Export to Obsidian* (or the gear icon)
+opens the sync page: choose the vault folder, tick the courses to keep in
+sync, press *Sync now*.
+
+**Afterwards** every press of *Export to Obsidian* opens the page and the
+sync starts by itself. If something is missing, the page says what: Chrome
+wants access to the folder confirmed again (one click; pick "Allow on every
+visit" to avoid it), the vault folder was moved, or you are logged out of
+Brightspace.
+
+**What ends up in the vault**
+
+```
+<vault>/
+├── Brightspace/                      mirror of Brightspace, do not edit
+│   ├── ! Brightspace.md              top note listing the courses
+│   └── CSE12A - Calculus/
+│       ├── CSE12A - Calculus.md      course home (MOC)
+│       ├── Week 1.md                 one note per chapter: Contents + MOC
+│       ├── Week 1/
+│       │   ├── Lecture slides.pdf    original files next to the notes
+│       │   ├── Deck.pptx + Deck.md   slide text is extracted into a note
+│       │   └── Intro.md              Brightspace pages become Markdown
+│       ├── Assignments.md · Grades.md · Announcements.md
+├── Courses/                          your side: write your notes here
+│   ├── CSE12A - Calculus.md          hub: AUTO block + your `## Notes`
+│   └── CSE12A - Calculus Notebook.md
+├── ! Course Notes.md                 groups the hubs
+└── .brightspace-sync/                state, hidden from Obsidian
+```
+
+- Nothing is duplicated: a sync adds what is new and updates what changed,
+  in place. An unchanged course costs a handful of requests and writes
+  nothing.
+- Video and audio files are not copied; they stay a link to Brightspace.
+  YouTube topics become a note with the link.
+- Never automatic: deleting files that disappeared from Brightspace, and
+  overwriting notes you edited inside `Brightspace/`. Both are listed after
+  the sync with a button to confirm.
+- Files that get overwritten or removed are backed up first under
+  `.brightspace-sync/backups/` (last three syncs only). *Undo last sync*
+  restores them.
+- Hub notes: only the block between the `AUTO` markers is regenerated; your
+  text is kept. The hub's class table needs the Dataview plugin and a
+  `Timetable/` folder, which this extension does not create.
+- One vault belongs to one Brightspace account; a different account is
+  refused instead of mixing two people's courses.
+
+Not ported from CSE-vault-sync: the timetable mirror (it reads MyTimetable,
+not Brightspace) and the AGENT-SUMMARY dashboards.
 
 ## Limits
 
-- Not yet run against live Brightspace: the logic is covered by unit tests
-  with a simulated course. If the popup shows no chapters or an error, the
-  message in the popup says which request failed.
+- The Obsidian sync has not been run against live Brightspace yet. It reads
+  Brightspace directly from the extension page (not through the course tab,
+  like the zip download does); if the page says you are not logged in while
+  you are, that is the part to look at.
 - The whole zip is built in the tab's memory before it is saved. Fine for
   slides and documents; a course with gigabytes of uploaded video files may
   be too much.
@@ -89,12 +142,16 @@ npm run dev         # browser with hot reload
 ```
 src/entrypoints/popup/        the popup (checkboxes, chapter tree, button)
 src/entrypoints/content.ts    runs in the Brightspace tab: scan, fetch, zip
-src/entrypoints/dashboard/    separate tab for Obsidian vault sync
+src/entrypoints/sync/         Obsidian sync page (setup once, then one click)
 src/lib/valence.ts            throttled read-only Brightspace API client
 src/lib/scan.ts               course structure -> tree of chapters and topics
 src/lib/zipexport.ts          zip layout, Links.md, Announcements.md, Grades.md
 src/lib/htmlmd.ts             HTML -> Markdown (announcements)
-src/lib/vault/                Obsidian sync (notes, plan/apply/undo)
+src/lib/pptx.ts               slide text of .pptx decks
+src/lib/vault/build.ts        notes + MOCs in the CSE-vault-sync layout
+src/lib/vault/hubs.ts         Courses/ hub notes (user text preserved)
+src/lib/vault/sync.ts         compare / apply / undo, manifest, backups
+src/lib/vault/run.ts          the one-click sync
 ```
 
 ## Fair use

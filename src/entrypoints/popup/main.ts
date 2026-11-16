@@ -319,12 +319,38 @@ async function startDownload(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------- Obsidian
+
+/**
+ * The sync itself runs in its own tab: a popup closes the moment it loses
+ * focus, and writing into the vault folder needs a page that stays open.
+ * If that tab is already open it is reused.
+ */
+async function openSync(run: boolean): Promise<void> {
+  const base = browser.runtime.getURL('/sync.html');
+  try {
+    const tabs = await browser.runtime.getContexts({ contextTypes: ['TAB'] });
+    const open = tabs.find((c) => c.documentUrl?.startsWith(base));
+    if (open && open.tabId >= 0) {
+      // Message first: focusing the tab closes this popup.
+      if (run) await browser.runtime.sendMessage({ type: 'vault-run' }).catch(() => {});
+      if (open.windowId >= 0) await browser.windows.update(open.windowId, { focused: true });
+      await browser.tabs.update(open.tabId, { active: true });
+      window.close();
+      return;
+    }
+  } catch {
+    /* fall through to a new tab */
+  }
+  await browser.tabs.create({ url: `${base}${run ? '#run' : ''}` });
+}
+
 // ---------------------------------------------------------------- init
 
 async function init(): Promise<void> {
-  $('obsidian').addEventListener('click', () => {
-    void browser.tabs.create({ url: browser.runtime.getURL('/dashboard.html') });
-  });
+  // Export starts a sync on the sync page; the gear only opens that page.
+  $('obsidian').addEventListener('click', () => void openSync(true));
+  $('settings').addEventListener('click', () => void openSync(false));
 
   const saved = (await browser.storage.local.get('popup')).popup as Partial<Stored> | undefined;
   if (saved?.flags) flags = { ...flags, ...saved.flags };

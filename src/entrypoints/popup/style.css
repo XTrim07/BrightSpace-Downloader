@@ -26,7 +26,22 @@ body {
 }
 header { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
 .logo { width: 22px; height: 22px; color: var(--pink); flex: none; }
-h1 { margin: 0; font-size: 18px; font-weight: 700; color: var(--muted); letter-spacing: -0.01em; }
+h1 { margin: 0; font-size: 18px; font-weight: 700; color: var(--muted); letter-spacing: -0.01em; flex: 1; }
+#settings {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid #3f3f49;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+#settings:hover { color: var(--text); border-color: var(--muted); }
+#settings svg { width: 19px; height: 19px; }
 
 .label { font-size: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
 .actions { display: flex; align-items: center; gap: 10px; }
