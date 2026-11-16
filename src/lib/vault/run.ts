@@ -12,6 +12,7 @@ import { type Api, AuthExpiredError } from '../valence';
 import { addVaultHome, buildVault, type BuildOptions } from './build';
 import type { VaultFS } from './fs';
 import { syncHubs, type HubsResult } from './hubs';
+import { syncTimetable, type TimetableResult } from './timetable';
 import {
   applyPlan, groupOf, loadManifest, planSync, pruneBackups, STATE_DIR,
   type Action, type Group, type Plan, type SyncLog,
@@ -25,14 +26,18 @@ export interface VaultSettings {
   virtRoot: string;
   /** `Courses/` hub notes: where the student's own notes live */
   hubs: boolean;
+  /** timetable window around today, in days */
+  daysPast: number;
+  daysFuture: number;
 }
 
 export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
   outName: 'Brightspace', virtFolder: true, virtRoot: '! Index', hubs: true,
+  daysPast: 14, daysFuture: 120,
 };
 
 export interface Stage {
-  phase: 'scan' | 'read' | 'compare' | 'write' | 'hubs';
+  phase: 'scan' | 'read' | 'compare' | 'write' | 'timetable' | 'hubs';
   /** course being read, or file being written */
   detail: string;
   done: number;
@@ -47,6 +52,9 @@ export interface RunResult {
   pendingRemove: Action[];
   pendingEdited: Action[];
   hubs: HubsResult | null;
+  /** null when no timetable feed is configured */
+  timetable: TimetableResult | null;
+  timetableError: string;
   skippedCourses: { name: string; reason: string }[];
   warnings: string[];
 }
@@ -84,6 +92,8 @@ export async function runVaultSync(
   settings: VaultSettings,
   owner: string,
   onStage: (stage: Stage) => void = () => {},
+  /** returns the MyTimetable ICS feed; omitted when the student has not set one up */
+  loadIcs?: () => Promise<string>,
 ): Promise<RunResult> {
   const manifest = await loadManifest(fs);
   if (manifest.owner && owner && manifest.owner !== owner) throw new OwnerMismatchError(manifest.owner, owner);
@@ -127,13 +137,27 @@ export async function runVaultSync(
   await fs.write(`${STATE_DIR}/textcache.json`, JSON.stringify(texts));
   await pruneBackups(fs);
 
+  // Same order as upstream: Brightspace, then the timetable (it links to the
+  // course folders), then the hubs (they count the upcoming classes).
+  let timetable: TimetableResult | null = null;
+  let timetableError = '';
+  if (loadIcs) {
+    onStage({ phase: 'timetable', detail: '', done: 0, total: 0 });
+    try {
+      timetable = await syncTimetable(fs, await loadIcs(), settings);
+    } catch (ex) {
+      // The calendar must never cost the student the course sync.
+      timetableError = (ex as Error).message || String(ex);
+    }
+  }
+
   let hubs: HubsResult | null = null;
   if (settings.hubs) {
     onStage({ phase: 'hubs', detail: '', done: 0, total: 0 });
     hubs = await syncHubs(fs, settings.outName, settings.virtFolder ? settings.virtRoot : '');
   }
   return {
-    log, plan, hubs, skippedCourses, warnings,
+    log, plan, hubs, timetable, timetableError, skippedCourses, warnings,
     unchanged: plan.unchanged,
     pendingRemove: plan.actions.filter((a) => a.op === 'remove'),
     pendingEdited: plan.actions.filter((a) => groupOf(a) === 'overwriteEdited'),
