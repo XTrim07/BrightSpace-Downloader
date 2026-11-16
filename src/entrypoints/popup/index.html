@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>BrightSpace Downloader</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3v11m0 0l-4.5-4.5M12 14l4.5-4.5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+          fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <h1>BrightSpace Downloader</h1>
+    </header>
+
+    <div class="label"><span>Folders</span>
+      <span class="actions">
+        <button id="select-all" disabled>
+          <svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M4.3 7.2l1.9 1.9 3.6-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          Select all
+        </button>
+        <button id="collapse" disabled>Collapse all</button>
+      </span></div>
+    <div id="folders"><div class="empty">Open any page of BrightSpace first.</div></div>
+
+    <div class="options">
+      <label><input type="checkbox" data-opt="grades" /><span>Grades</span></label>
+      <label><input type="checkbox" data-opt="announcements" /><span>Announcements</span></label>
+      <label><input type="checkbox" data-opt="links" /><span>Video links</span></label>
+    </div>
+
+    <button id="download" disabled>Select folders to download</button>
+    <button id="obsidian">Export to Obsidian</button>
+
+    <div id="footer" hidden>
+      <progress id="progress" hidden></progress>
+      <div id="status"></div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
