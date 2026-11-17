@@ -12,7 +12,7 @@ import { type Api, AuthExpiredError } from '../valence';
 import { addVaultHome, buildVault, type BuildOptions } from './build';
 import type { VaultFS } from './fs';
 import { syncHubs, type HubsResult } from './hubs';
-import { syncTimetable, type TimetableResult } from './timetable';
+import { setupFullCalendar, syncTimetable, type TimetableResult } from './timetable';
 import {
   applyPlan, groupOf, loadManifest, planSync, pruneBackups, STATE_DIR,
   type Action, type Group, type Plan, type SyncLog,
@@ -145,11 +145,14 @@ export async function runVaultSync(
     onStage({ phase: 'timetable', detail: '', done: 0, total: 0 });
     try {
       timetable = await syncTimetable(fs, await loadIcs(), settings);
+      timetable.calendarSetup = await setupFullCalendar(fs, timetable.categories);
     } catch (ex) {
       // The calendar must never cost the student the course sync.
       timetableError = (ex as Error).message || String(ex);
     }
   }
+
+  if (settings.virtFolder && settings.virtRoot) await ensureRootNote(fs, settings);
 
   let hubs: HubsResult | null = null;
   if (settings.hubs) {
@@ -162,6 +165,22 @@ export async function runVaultSync(
     pendingRemove: plan.actions.filter((a) => a.op === 'remove'),
     pendingEdited: plan.actions.filter((a) => groupOf(a) === 'overwriteEdited'),
   };
+}
+
+/**
+ * The VirtFolder tree hangs off the root note (`! Index`): every generated
+ * note points at it. Create it when the vault has none, never touch it after.
+ */
+export async function ensureRootNote(fs: VaultFS, settings: VaultSettings): Promise<boolean> {
+  const want = `${settings.virtRoot}.md`.toLowerCase();
+  if ((await fs.listFiles('')).some((n) => n.toLowerCase() === want)) return false;
+  const lines = ['---', `title: "${settings.virtRoot.replace(/"/g, "'")}"`, 'tags: [moc]', '---',
+    `# ${settings.virtRoot.replace(/^!\s*/, '')}`, '',
+    'Root of the folder tree (VirtFolder). Notes that list this note under `Folders:` appear below it.', '',
+    `- [[${settings.outName}/! ${settings.outName}|📚 Brightspace]]`];
+  if (settings.hubs) lines.push('- [[! Course Notes|📝 Course Notes]]');
+  await fs.write(`${settings.virtRoot}.md`, `${lines.join('\n')}\n`);
+  return true;
 }
 
 /** Carry out what a sync left pending, after the student confirmed it. */

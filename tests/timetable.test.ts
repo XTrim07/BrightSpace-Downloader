@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryFS } from '../src/lib/vault/fs';
+import { DEFAULT_VAULT_SETTINGS, ensureRootNote } from '../src/lib/vault/run';
 import {
-  courseCode, extractField, maintainAnnotated, parseIcs, syncTimetable, ttSanitize,
+  calendarTitle, courseCode, extractField, maintainAnnotated, mergeGroups, parseIcs,
+  setupFullCalendar, syncTimetable, ttSanitize,
 } from '../src/lib/vault/timetable';
 
 const NOW = new Date('2026-11-17T12:00:00Z');
@@ -76,7 +78,7 @@ describe('syncTimetable', () => {
       '2027-03-01 0945-1130 Mentor meeting.md',
     ]);
     expect(await fs.readText('Timetable/2026-11-18 0845-1030 CSE12A Calculus Lecture 12.md')).toBe(`---
-title: "CSE12A Calculus: Lecture [1/2]"
+title: "CSE12A - Calculus: Lecture [1/2]"
 date: 2026-11-18
 startTime: "08:45"
 endTime: "10:30"
@@ -93,19 +95,9 @@ uid: "lec-1@timeedit"
 <!-- AUTO:START -->
 # CSE12A Calculus: Lecture [1/2]
 
-> [!info]- 🕐 When & where
-> **2026-11-18 · 08:45–10:30**
-> EEMCS-Hall Ampere
-> **Type:** Lecture
+📍 EEMCS-Hall Ampere · Lecture
 
-> [!warning]- ⛔ Auto-generated section
-> Everything outside the AUTO markers is yours and is kept. Dragging on the calendar is reverted. Hand-made sessions go in \`Sessions/\`.
-
-> [!note]- 🔗 Links
-> - Course: [[Courses/CSE12A - Calculus]]
-> - Notebook: [[Courses/CSE12A - Calculus Notebook|📓 CSE12A - Calculus Notebook]]
-> - Brightspace: [[Brightspace/CSE12A - Calculus/CSE12A - Calculus]]
-> - _No dated lecture note for this day yet._
+[[Courses/CSE12A - Calculus|📚 CSE12A - Calculus]] · [[Courses/CSE12A - Calculus Notebook|📓 Notebook]] · [[Brightspace/CSE12A - Calculus/CSE12A - Calculus|Brightspace]]
 
 <!-- AUTO:END -->
 
@@ -113,10 +105,14 @@ uid: "lec-1@timeedit"
 `);
     const tutorial = (await fs.readText('Timetable/2026-11-19 1345-1530 CSE12ACSE11C CSE12A Tutorial.md'))!;
     expect(tutorial).toContain('codes: ["CSE12A", "CSE11C"]');
-    expect(tutorial).toContain('> - Course: [[Courses/CSE12A - Calculus]] · [[Courses/CSE11C - Computer Organisation]]');
+    expect(tutorial).toContain('title: "CSE12A - Tutorial"');
+    expect(tutorial).toContain('[[Courses/CSE12A - Calculus|📚 CSE12A - Calculus]]');
+    expect(tutorial).toContain('[[Courses/CSE11C - Computer Organisation|📚 CSE11C - Computer Organisation]]');
     const mentor = (await fs.readText('Timetable/2027-03-01 0945-1130 Mentor meeting.md'))!;
     expect(mentor).not.toContain('room:');
-    expect(mentor).not.toContain('🔗 Links');
+    expect(mentor).toContain('title: "Mentor meeting"');
+    expect(mentor).not.toContain('📚');
+    expect(res.categories).toEqual(['CSE12A']);
   });
 
   it('is stable, keeps class notes, and only prunes notes without writing', async () => {
@@ -151,12 +147,78 @@ uid: "lec-1@timeedit"
     await syncTimetable(fs, ICS, OPTS, NOW);
     const note = (await fs.readText('Timetable/2026-11-18 0845-1030 CSE12A Calculus Lecture 12.md'))!;
     expect(note).toContain('lecture: "[[CSE12A - 2026-11-18 - limits]]"');
-    expect(note).toContain('> - Lecture notes: [[CSE12A - 2026-11-18 - limits]]');
+    expect(note).toContain('✏️ [[CSE12A - 2026-11-18 - limits]]');
   });
 
   it('maintains the annotated flag', () => {
     const base = '---\ntitle: x\ntags: [t]\n---\nbody\n\n## Notes\n';
     expect(maintainAnnotated(base)).toBe(base);
     expect(maintainAnnotated(`${base}\nmine\n`)).toBe('---\ntitle: x\nannotated: true\ntags: [t]\n---\nbody\n\n## Notes\n\nmine\n');
+  });
+});
+
+describe('calendar look', () => {
+  const ev = (room: string, uid: string) => ({
+    day: '2026-11-09', start: '08:45', end: '10:45', summary: 'CSE12A - Calculus',
+    description: '', room, uid, at: 1,
+  });
+
+  it('merges the same class given to parallel groups into one note', async () => {
+    const merged = mergeGroups([ev('Hall A', 'a'), ev('Hall B', 'b'), ev('Hall A', 'c'), ev('No Room (No Room)', 'd')]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].room).toBe('Hall A, Hall B');
+    expect(merged[0].uid).toBe('a');
+
+    const vevent = (uid: string, room: string) => ['BEGIN:VEVENT', `UID:${uid}`,
+      'DTSTART:20261118T074500Z', 'DTEND:20261118T094500Z', 'SUMMARY:CSE12A - Calculus',
+      'DESCRIPTION:Course code: CSE12A\\nType: Colstructie', `LOCATION:${room}`, 'END:VEVENT'];
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', ...vevent('g1', 'Pulse-Hall 10'),
+      ...vevent('g2', 'Echo-Hall E'), 'END:VCALENDAR'].join('\r\n');
+    const fs = new MemoryFS();
+    const res = await syncTimetable(fs, ics, OPTS, NOW);
+    expect(await fs.listFiles('Timetable')).toEqual(['2026-11-18 0845-1045 CSE12A - Calculus.md']);
+    expect(res.written).toHaveLength(1);
+    const note = (await fs.readText('Timetable/2026-11-18 0845-1045 CSE12A - Calculus.md'))!;
+    expect(note).toContain('room: "Pulse-Hall 10, Echo-Hall E"');
+    expect(note).toContain('📍 Pulse-Hall 10, Echo-Hall E · Colstructie');
+  });
+
+  it('titles classes CODE - rest so the calendar colours them per course', () => {
+    expect(calendarTitle('CSE12A - Calculus', 'CSE12A')).toEqual({ category: 'CSE12A', title: 'CSE12A - Calculus' });
+    expect(calendarTitle('CSE12A Calculus: Lecture', 'CSE12A').title).toBe('CSE12A - Calculus: Lecture');
+    expect(calendarTitle('CSE11A/CSE11B - Shared lab', 'CSE11A/CSE11B')).toEqual({ category: 'CSE11A', title: 'CSE11A - Shared lab' });
+    expect(calendarTitle('Mentor meeting', '')).toEqual({ category: '', title: 'Mentor meeting' });
+  });
+
+  it('sets up Full Calendar once, keeping what the student configured', async () => {
+    const fs = new MemoryFS();
+    expect(await setupFullCalendar(fs, ['CSE12A'])).toBe(false); // plugin not installed
+    const path = '.obsidian/plugins/full-calendar-remastered/data.json';
+    fs.set(path, JSON.stringify({
+      calendarSources: [{ type: 'local', id: 'local_1', name: 'Mine', directory: 'Events', color: '#000' }],
+      categorySettings: [{ name: 'CSE12A', color: '#123456' }], other: 7,
+    }));
+    expect(await setupFullCalendar(fs, ['CSE12A', 'CSE12B'])).toBe(true);
+    const d = JSON.parse((await fs.readText(path))!);
+    expect(d.other).toBe(7);
+    expect(d.calendarSources.map((s: any) => s.id)).toEqual(['local_1', 'local_2']);
+    expect(d.calendarSources[1]).toMatchObject({ type: 'local', directory: 'Timetable' });
+    expect(d.enableAdvancedCategorization).toBe(true);
+    expect(d.categorySettings[0]).toEqual({ name: 'CSE12A', color: '#123456' });
+    expect(d.categorySettings[1].name).toBe('CSE12B');
+    expect(d.categorySettings[1].color).not.toBe('#123456');
+    expect(await setupFullCalendar(fs, ['CSE12A', 'CSE12B'])).toBe(false); // nothing new
+  });
+
+  it('creates the VirtFolder root note only when missing', async () => {
+    const fs = new MemoryFS();
+    expect(await ensureRootNote(fs, DEFAULT_VAULT_SETTINGS)).toBe(true);
+    const text = (await fs.readText('! Index.md'))!;
+    expect(text).toContain('[[Brightspace/! Brightspace|📚 Brightspace]]');
+    fs.set('! index.md', 'mine');
+    const other = new MemoryFS();
+    other.set('! index.md', 'mine');
+    expect(await ensureRootNote(other, DEFAULT_VAULT_SETTINGS)).toBe(false);
+    expect(await other.readText('! index.md')).toBe('mine');
   });
 });

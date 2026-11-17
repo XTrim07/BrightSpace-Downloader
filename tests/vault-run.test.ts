@@ -125,6 +125,7 @@ describe('runVaultSync', () => {
     expect(res.skippedCourses).toEqual([]);
     expect(vaultFiles(fs)).toEqual([
       '! Course Notes.md',
+      '! Index.md',
       'Brightspace/! Brightspace.md',
       `${OUT}/${V}.md`,
       `${OUT}/Week 1.md`,

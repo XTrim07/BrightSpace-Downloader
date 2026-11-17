@@ -369,6 +369,10 @@ function renderResult(): void {
     card.append(h('div', { class: 'hint' },
       `Calendar: ${t.instances} classes · ${t.written.length} note(s) written · ${t.pruned.length} removed` +
       (t.kept.length ? ` · ${t.kept.length} cancelled class(es) kept because they have your notes` : '')));
+    if (t.calendarSetup) {
+      card.append(h('div', { class: 'warn' },
+        'Full Calendar was set up (Timetable calendar, one colour per course). Restart Obsidian to see it.'));
+    }
     if (t.written.length) card.append(fileList('Calendar notes written', t.written));
   } else if (r.timetableError) {
     card.append(h('div', { class: 'warn' }, `Calendar not updated: ${r.timetableError}`));
