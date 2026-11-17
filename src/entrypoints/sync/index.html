@@ -38,11 +38,22 @@
         <div id="course-list" class="list"><div class="empty">Loading your courses…</div></div>
       </section>
 
+      <section>
+        <h2><span class="step">3</span> Calendar <span class="optional">optional</span></h2>
+        <p class="hint">Your personal MyTimetable link puts every class in <code>Timetable/</code>, one note per class, linked to its course. In MyTimetable: <i>Export → Subscribe</i>, copy the link and paste it here. It stays on this computer. In Obsidian the week view comes from the <i>Full Calendar</i> plugin pointed at the <code>Timetable</code> folder.</p>
+        <div class="row">
+          <input id="ics-url" type="url" placeholder="https://mytimetable.tudelft.nl/ical?..." spellcheck="false" />
+          <span id="ics-status" class="status"></span>
+        </div>
+      </section>
+
       <details id="advanced">
         <summary>Advanced</summary>
         <div class="grid">
           <label>Folder in the vault <input id="out-name" type="text" /></label>
           <label>Root note <input id="virt-root" type="text" /></label>
+          <label>Calendar: days back <input id="days-past" type="number" min="0" max="365" /></label>
+          <label>Calendar: days ahead <input id="days-future" type="number" min="1" max="365" /></label>
           <label class="check"><input id="virt-folder" type="checkbox" /> VirtFolder links (<code>Folders:</code> in every note)</label>
           <label class="check"><input id="hubs" type="checkbox" /> Course hub notes in <code>Courses/</code> (your own notes go there)</label>
         </div>

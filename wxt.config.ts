@@ -7,6 +7,6 @@ export default defineConfig({
     description:
       'Download the content of a Brightspace course as one .zip: files, links, announcements and grades.',
     permissions: ['storage', 'unlimitedStorage', 'scripting'],
-    host_permissions: ['https://brightspace.tudelft.nl/*'],
+    host_permissions: ['https://brightspace.tudelft.nl/*', 'https://mytimetable.tudelft.nl/*'],
   },
 });

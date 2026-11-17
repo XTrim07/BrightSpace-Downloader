@@ -37,6 +37,8 @@ function h<K extends keyof HTMLElementTagNameMap>(
 interface Stored {
   settings: VaultSettings;
   courseIds: number[];
+  /** personal MyTimetable ICS link ('' = no calendar) */
+  icsUrl: string;
   /** shown while the handle is still being restored */
   vaultName: string;
 }
@@ -45,7 +47,7 @@ interface Stored {
 type Access = 'none' | 'granted' | 'prompt' | 'missing';
 
 const api = new ValenceClient();
-let cfg: Stored = { settings: { ...DEFAULT_VAULT_SETTINGS }, courseIds: [], vaultName: '' };
+let cfg: Stored = { settings: { ...DEFAULT_VAULT_SETTINGS }, courseIds: [], icsUrl: '', vaultName: '' };
 let vault: FileSystemDirectoryHandle | null = null;
 let access: Access = 'none';
 let looksLikeVault = true;
@@ -161,6 +163,7 @@ function showStage(s: Stage): void {
   else if (s.phase === 'read') stage(`Reading ${s.detail}`, '', s.done, s.total);
   else if (s.phase === 'compare') stage('Comparing with your vault…', '', 0, 0);
   else if (s.phase === 'write') stage(s.total ? `Writing ${s.done}/${s.total} · ${s.detail}` : 'Writing…', '', s.done, s.total);
+  else if (s.phase === 'timetable') stage('Updating the calendar…', '', 0, 0);
   else stage('Updating course hubs…', '', 0, 0);
 }
 
@@ -283,6 +286,64 @@ function setAllCourses(on: boolean): void {
   refresh();
 }
 
+// ---------------------------------------------------------------- calendar
+
+/** A MyTimetable subscription link: https, on mytimetable.tudelft.nl. Returns why not, or ''. */
+function icsProblem(url: string): string {
+  if (!url) return '';
+  let u: URL;
+  try {
+    u = new URL(url.replace(/^webcal:/i, 'https:'));
+  } catch {
+    return 'This is not a link.';
+  }
+  if (u.hostname !== 'mytimetable.tudelft.nl') return 'Use the subscription link from mytimetable.tudelft.nl.';
+  return '';
+}
+
+async function fetchIcs(url: string): Promise<string> {
+  const res = await fetch(url.replace(/^webcal:/i, 'https:'), { credentials: 'omit' });
+  if (!res.ok) throw new Error(`MyTimetable answered ${res.status}. Is the link still valid?`);
+  const text = await res.text();
+  if (!text.includes('BEGIN:VCALENDAR')) throw new Error('The link did not return a calendar. Copy the subscription link again.');
+  return text;
+}
+
+function bindCalendar(): void {
+  const el = $<HTMLInputElement>('ics-url');
+  const st = $('ics-status');
+  const show = () => {
+    const problem = icsProblem(cfg.icsUrl);
+    st.className = `status ${problem ? 'bad' : cfg.icsUrl ? 'ok' : ''}`;
+    st.textContent = problem || (cfg.icsUrl ? '✓ calendar on' : 'off');
+  };
+  el.value = cfg.icsUrl;
+  el.addEventListener('change', () => {
+    const v = el.value.trim();
+    cfg.icsUrl = icsProblem(v) ? cfg.icsUrl : v;
+    if (icsProblem(v)) {
+      st.className = 'status bad';
+      st.textContent = icsProblem(v);
+      return;
+    }
+    void save();
+    show();
+  });
+  show();
+
+  const num = (id: string, key: 'daysPast' | 'daysFuture', min: number) => {
+    const n = $<HTMLInputElement>(id);
+    n.value = String(cfg.settings[key]);
+    n.addEventListener('change', () => {
+      cfg.settings[key] = Math.min(365, Math.max(min, Math.round(Number(n.value)) || DEFAULT_VAULT_SETTINGS[key]));
+      n.value = String(cfg.settings[key]);
+      void save();
+    });
+  };
+  num('days-past', 'daysPast', 0);
+  num('days-future', 'daysFuture', 1);
+}
+
 // ---------------------------------------------------------------- sync
 
 function fileList(title: string, paths: string[]): HTMLElement {
@@ -303,6 +364,15 @@ function renderResult(): void {
   if (l.added.length) card.append(fileList('Added', l.added));
   if (l.modified.length) card.append(fileList('Updated', l.modified));
   if (l.failed.length) card.append(fileList('Could not be downloaded — will be retried next sync', l.failed.map((f) => `${f.path} (${f.reason})`)));
+  if (r.timetable) {
+    const t = r.timetable;
+    card.append(h('div', { class: 'hint' },
+      `Calendar: ${t.instances} classes · ${t.written.length} note(s) written · ${t.pruned.length} removed` +
+      (t.kept.length ? ` · ${t.kept.length} cancelled class(es) kept because they have your notes` : '')));
+    if (t.written.length) card.append(fileList('Calendar notes written', t.written));
+  } else if (r.timetableError) {
+    card.append(h('div', { class: 'warn' }, `Calendar not updated: ${r.timetableError}`));
+  }
   if (r.hubs?.written.length) card.append(fileList('Course hub notes refreshed', r.hubs.written));
   if (r.skippedCourses.length) {
     card.append(fileList('Courses that could not be read', r.skippedCourses.map((s) => `${s.name} — ${s.reason}`)));
@@ -360,7 +430,8 @@ async function runSync(fromClick: boolean): Promise<void> {
   refresh();
   try {
     const fs = new HandleFS(vault);
-    result = await runVaultSync(api, fs, chosenCourses(), cfg.settings, me.uniqueName, showStage);
+    result = await runVaultSync(api, fs, chosenCourses(), cfg.settings, me.uniqueName, showStage,
+      cfg.icsUrl ? () => fetchIcs(cfg.icsUrl) : undefined);
     const { log: l } = result;
     for (const w of result.warnings) log(w);
     for (const f of l.failed) log(`failed: ${f.path} (${f.reason})`);
@@ -472,6 +543,7 @@ async function init(): Promise<void> {
     cfg = {
       settings: { ...DEFAULT_VAULT_SETTINGS, ...saved.settings },
       courseIds: saved.courseIds ?? [],
+      icsUrl: saved.icsUrl ?? '',
       vaultName: saved.vaultName ?? '',
     };
   }
@@ -479,6 +551,7 @@ async function init(): Promise<void> {
   emptyCourses = new Set(Object.entries(known).filter(([, v]) => v.has === false).map(([id]) => Number(id)));
 
   bindSettings();
+  bindCalendar();
   try {
     vault = (await idbGet<FileSystemDirectoryHandle>('vault')) ?? null;
     await checkAccess();

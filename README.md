@@ -96,6 +96,7 @@ Brightspace.
 ├── Courses/                          your side: write your notes here
 │   ├── CSE12A - Calculus.md          hub: AUTO block + your `## Notes`
 │   └── CSE12A - Calculus Notebook.md
+├── Timetable/                        one note per class (if a calendar link is set)
 ├── ! Course Notes.md                 groups the hubs
 └── .brightspace-sync/                state, hidden from Obsidian
 ```
@@ -117,8 +118,15 @@ Brightspace.
 - One vault belongs to one Brightspace account; a different account is
   refused instead of mixing two people's courses.
 
-Not ported from CSE-vault-sync: the timetable mirror (it reads MyTimetable,
-not Brightspace) and the AGENT-SUMMARY dashboards.
+**Calendar (optional).** Paste your MyTimetable subscription link on the
+sync page (MyTimetable → Export → Subscribe). Every sync then writes one
+note per class into `Timetable/` for the next 120 days (and the last 14),
+linked to its course hub, notebook and Brightspace page. Only the block
+between the `AUTO` markers is regenerated; what you write under `## Notes`
+is kept, and a cancelled class with notes is never deleted. The week view
+in Obsidian comes from the Full Calendar plugin pointed at `Timetable/`.
+
+Not ported from CSE-vault-sync: the AGENT-SUMMARY dashboards.
 
 ## Limits
 
