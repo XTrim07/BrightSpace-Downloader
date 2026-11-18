@@ -13,7 +13,7 @@ import type { Course } from '@/lib/model';
 import { AuthExpiredError, BASE, enrollments, ValenceClient, whoami } from '@/lib/valence';
 import { HandleFS } from '@/lib/vault/fs';
 import {
-  applyPending, DEFAULT_VAULT_SETTINGS, OwnerMismatchError, runVaultSync,
+  applyPending, DEFAULT_VAULT_SETTINGS, OwnerMismatchError, runVaultSync, SyncCancelledError,
   type RunResult, type Stage, type VaultSettings,
 } from '@/lib/vault/run';
 import { lastSync, undoLast } from '@/lib/vault/sync';
@@ -57,6 +57,8 @@ let courses: Course[] = [];
 /** courses the popup already found to be empty: not offered here */
 let emptyCourses = new Set<number>();
 let busy = false;
+/** set while a sync runs; Cancel aborts it */
+let stopper: AbortController | null = null;
 let result: RunResult | null = null;
 /** opened by "Export to Obsidian": start as soon as everything is in place */
 let wantRun = location.hash === '#run';
@@ -224,6 +226,17 @@ function refresh(): void {
   $('sync').textContent = busy ? 'Syncing…' : access === 'prompt' ? 'Reconnect vault and sync' : 'Sync now';
   $<HTMLButtonElement>('undo').disabled = busy || access !== 'granted';
   $<HTMLButtonElement>('choose').disabled = busy;
+  const cancel = $<HTMLButtonElement>('cancel');
+  cancel.hidden = !busy;
+  cancel.disabled = !!stopper?.signal.aborted;
+  cancel.textContent = stopper?.signal.aborted ? 'Cancelling…' : 'Cancel';
+}
+
+function cancelSync(): void {
+  if (!busy || !stopper || stopper.signal.aborted) return;
+  stopper.abort();
+  stage('Cancelling… finishing the file in progress.', 'warn');
+  refresh();
 }
 
 /** Run something triggered by a click; errors end up in the stage line. */
@@ -428,6 +441,8 @@ async function runSync(fromClick: boolean): Promise<void> {
   }
   if (access !== 'granted' || !me || !cfg.courseIds.length) return;
   busy = true;
+  stopper = new AbortController();
+  api.signal = stopper.signal;
   wantRun = false;
   result = null;
   renderResult();
@@ -435,17 +450,21 @@ async function runSync(fromClick: boolean): Promise<void> {
   try {
     const fs = new HandleFS(vault);
     result = await runVaultSync(api, fs, chosenCourses(), cfg.settings, me.uniqueName, showStage,
-      cfg.icsUrl ? () => fetchIcs(cfg.icsUrl) : undefined);
+      cfg.icsUrl ? () => fetchIcs(cfg.icsUrl) : undefined, stopper.signal);
     const { log: l } = result;
     for (const w of result.warnings) log(w);
     for (const f of l.failed) log(`failed: ${f.path} (${f.reason})`);
     const changed = l.added.length + l.modified.length;
-    stage(changed
+    if (result.cancelled) {
+      stage(`Cancelled. ${l.added.length} added and ${l.modified.length} updated so far; the rest comes with the next sync.`, 'warn');
+    } else stage(changed
       ? `Vault updated: ${l.added.length} added, ${l.modified.length} updated.`
       : 'Your vault is already up to date.', l.failed.length ? 'warn' : 'ok');
     await browser.storage.local.set({ vaultLast: { at: Date.now(), added: l.added.length, updated: l.modified.length } });
   } catch (ex) {
-    if (ex instanceof AuthExpiredError) {
+    if (ex instanceof SyncCancelledError || (ex as DOMException)?.name === 'AbortError') {
+      stage('Cancelled before anything was written. Your vault is unchanged.', 'warn');
+    } else if (ex instanceof AuthExpiredError) {
       me = null;
       stage('Your Brightspace session expired — log in again, then press Sync now.', 'bad');
     } else if (ex instanceof OwnerMismatchError) {
@@ -459,6 +478,8 @@ async function runSync(fromClick: boolean): Promise<void> {
     }
   } finally {
     busy = false;
+    stopper = null;
+    api.signal = undefined;
     renderResult();
     await showLastSync().catch(() => {});
     refresh();
@@ -520,6 +541,7 @@ function bindSettings(): void {
   $('courses-all').addEventListener('click', () => setAllCourses(true));
   $('courses-none').addEventListener('click', () => setAllCourses(false));
   $('sync').addEventListener('click', () => void runSync(true));
+  $('cancel').addEventListener('click', cancelSync);
   $('undo').addEventListener('click', () => void act('Undo', runUndo));
 }
 

@@ -57,6 +57,15 @@ export interface RunResult {
   timetableError: string;
   skippedCourses: { name: string; reason: string }[];
   warnings: string[];
+  /** Cancel was pressed while files were written: the rest waits for the next sync. */
+  cancelled: boolean;
+}
+
+/** Cancel pressed before anything was written to the vault. */
+export class SyncCancelledError extends Error {
+  constructor() {
+    super('Sync cancelled');
+  }
 }
 
 export class OwnerMismatchError extends Error {
@@ -94,7 +103,10 @@ export async function runVaultSync(
   onStage: (stage: Stage) => void = () => {},
   /** returns the MyTimetable ICS feed; omitted when the student has not set one up */
   loadIcs?: () => Promise<string>,
+  /** Cancel: stops between steps; once writing started, the vault is left consistent. */
+  signal?: AbortSignal,
 ): Promise<RunResult> {
+  const stopped = () => !!signal?.aborted;
   const manifest = await loadManifest(fs);
   if (manifest.owner && owner && manifest.owner !== owner) throw new OwnerMismatchError(manifest.owner, owner);
   if (owner) manifest.owner = owner;
@@ -108,6 +120,7 @@ export async function runVaultSync(
   const warnings: string[] = [];
   let i = 0;
   for (const course of courses) {
+    if (stopped()) break;
     const stage = { done: i++, total: courses.length };
     try {
       onStage({ phase: 'scan', detail: course.name, ...stage });
@@ -115,12 +128,25 @@ export async function runVaultSync(
       warnings.push(...sc.errors.map((e) => `${sc.code}: ${e}`));
       const errors = await hydrate(api, course.id, sc.tree,
         (title) => onStage({ phase: 'read', detail: `${course.name} — ${title}`, ...stage }), texts);
+      // A course read halfway must not be compared: its notes would lose their text.
+      if (stopped()) break;
       warnings.push(...errors.map((e) => `${sc.code}: could not read ${e}`));
       scans.push(sc);
     } catch (ex) {
       if (ex instanceof AuthExpiredError) throw ex;
+      if (stopped()) break;
       skippedCourses.push({ name: course.name, reason: (ex as Error).message || String(ex) });
     }
+  }
+
+  const saveCaches = async () => {
+    await fs.write(`${STATE_DIR}/state.json`, JSON.stringify(state));
+    await fs.write(`${STATE_DIR}/textcache.json`, JSON.stringify(texts));
+  };
+  if (stopped()) {
+    // Nothing written yet. Keep what was read so the next sync is quicker.
+    await saveCaches();
+    throw new SyncCancelledError();
   }
 
   onStage({ phase: 'compare', detail: '', done: 0, total: 0 });
@@ -133,9 +159,19 @@ export async function runVaultSync(
     (cid, tid) => api.fetchFile(cid, tid), APPLY,
     (done, total, path) => onStage({ phase: 'write', detail: path, done, total }));
 
-  await fs.write(`${STATE_DIR}/state.json`, JSON.stringify(state));
-  await fs.write(`${STATE_DIR}/textcache.json`, JSON.stringify(texts));
+  await saveCaches();
   await pruneBackups(fs);
+
+  const pendingRemove = plan.actions.filter((a) => a.op === 'remove');
+  const pendingEdited = plan.actions.filter((a) => groupOf(a) === 'overwriteEdited');
+  if (stopped()) {
+    // Files that were not fetched are not in the manifest: the next sync adds them.
+    log.failed = log.failed.filter((f) => !/cancel|abort/i.test(f.reason));
+    return {
+      log, plan, hubs: null, timetable: null, timetableError: '', skippedCourses, warnings,
+      unchanged: plan.unchanged, pendingRemove, pendingEdited, cancelled: true,
+    };
+  }
 
   // Same order as upstream: Brightspace, then the timetable (it links to the
   // course folders), then the hubs (they count the upcoming classes).
@@ -161,9 +197,7 @@ export async function runVaultSync(
   }
   return {
     log, plan, hubs, timetable, timetableError, skippedCourses, warnings,
-    unchanged: plan.unchanged,
-    pendingRemove: plan.actions.filter((a) => a.op === 'remove'),
-    pendingEdited: plan.actions.filter((a) => groupOf(a) === 'overwriteEdited'),
+    unchanged: plan.unchanged, pendingRemove, pendingEdited, cancelled: false,
   };
 }
 

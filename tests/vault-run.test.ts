@@ -9,7 +9,7 @@ import { normalizeLinks } from '../src/lib/vault/build';
 import { MemoryFS } from '../src/lib/vault/fs';
 import { hubParentText, readNotes, splitMarkers, updateHub } from '../src/lib/vault/hubs';
 import {
-  applyPending, DEFAULT_VAULT_SETTINGS, OwnerMismatchError, runVaultSync,
+  applyPending, DEFAULT_VAULT_SETTINGS, OwnerMismatchError, runVaultSync, SyncCancelledError,
 } from '../src/lib/vault/run';
 import { loadManifest } from '../src/lib/vault/sync';
 
@@ -230,5 +230,56 @@ describe('course hubs', () => {
     const again = hubParentText(edited, '! Index');
     expect(again).toContain('My semester plan');
     expect(hubParentText(again, '! Index')).toBe(again); // stable from here on
+  });
+});
+
+describe('cancel', () => {
+  const runWith = (fs: MemoryFS, api: Api, signal: AbortSignal) =>
+    runVaultSync(api, fs, [course], DEFAULT_VAULT_SETTINGS, 'aflorea', undefined, undefined, signal);
+
+  it('before writing: nothing reaches the vault, what was read is cached', async () => {
+    const fs = new MemoryFS();
+    const stop = new AbortController();
+    const base = fakeApi({ slidesLm: 'd1', withDeck: false });
+    const api: Api = {
+      get: base.get,
+      async fetchFile(c, t) {
+        stop.abort(); // pressed while pages are being read
+        return base.fetchFile(c, t);
+      },
+    };
+    await expect(runWith(fs, api, stop.signal)).rejects.toBeInstanceOf(SyncCancelledError);
+    const files = [...fs.files.keys()];
+    expect(files.some((f) => f.startsWith('Brightspace/'))).toBe(false);
+    expect(files).toContain('.brightspace-sync/textcache.json');
+    expect(await fs.readText('.brightspace-sync/manifest.json')).toBeNull();
+  });
+
+  it('while writing: stops, keeps the vault consistent, the next sync adds the rest', async () => {
+    const fs = new MemoryFS();
+    const stop = new AbortController();
+    const base = fakeApi({ slidesLm: 'd1', withDeck: false });
+    const api: Api = {
+      get: base.get,
+      async fetchFile(c, t) {
+        if (String(t) === '10') { // the PDF is only fetched when writing
+          stop.abort();
+          throw new DOMException('Cancelled', 'AbortError');
+        }
+        return base.fetchFile(c, t);
+      },
+    };
+    const res = await runWith(fs, api, stop.signal);
+    expect(res.cancelled).toBe(true);
+    expect(res.log.failed).toEqual([]);
+    expect(res.hubs).toBeNull();
+    expect(await fs.readText(`${OUT}/Week 1/Slides.pdf`)).toBeNull();
+    const manifest = await loadManifest(fs);
+    expect(manifest.files[`${V}/Week 1/Slides.pdf`]).toBeUndefined();
+    expect(manifest.files[`${V}/Week 1.md`]).toBeDefined();
+
+    const next = await run(fs, fakeApi({ slidesLm: 'd1', withDeck: false }));
+    expect(next.cancelled).toBe(false);
+    expect(next.log.added).toEqual([`${V}/Week 1/Slides.pdf`]);
   });
 });
