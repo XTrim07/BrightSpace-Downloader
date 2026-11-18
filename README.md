@@ -79,6 +79,11 @@ wants access to the folder confirmed again (one click; pick "Allow on every
 visit" to avoid it), the vault folder was moved, or you are logged out of
 Brightspace.
 
+**Cancel** stops a running sync. Pressed while Brightspace is still being
+read, nothing is written to the vault. Pressed while files are being written,
+the file in progress is finished, the vault is left consistent, and the next
+sync adds what is missing.
+
 **What ends up in the vault**
 
 ```
