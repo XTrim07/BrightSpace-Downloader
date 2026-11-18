@@ -91,7 +91,7 @@ export function mocNote(
   title: string, upTarget: string, brightspaceId: number | string, code: string,
   contents: string, entries: Entry[], virtFolder: boolean,
 ): string {
-  const lines = ['---', `up: [[${upTarget}]]`];
+  const lines = ['---', `up: "[[${upTarget}]]"`];
   if (virtFolder && upTarget) lines.push('Folders:', `  - "[[${upTarget}]]"`);
   lines.push(
     tagsLine(['brightspace']), `course_code: ${code}`, `brightspace_id: ${brightspaceId}`,
@@ -227,7 +227,7 @@ class CourseBuilder {
     const home = `${this.vname}/${this.vname}`;
     const vf = this.opts.virtFolder ? `Folders:\n  - "[[${home}]]"\n` : '';
     return (
-      `---\nup: [[${home}]]\n${vf}${tagsLine(['brightspace', ...extraTags])}\n` +
+      `---\nup: "[[${home}]]"\n${vf}${tagsLine(['brightspace', ...extraTags])}\n` +
       `course_code: ${this.sc.code}\n---\n`
     );
   }
@@ -312,7 +312,7 @@ export function assignmentsTable(boxes: Record<string, any>[] | null): string {
 export function vaultHome(homes: CourseHome[], opts: BuildOptions, today: string): string {
   const fm = ['---', tagsLine(['brightspace', 'moc'])];
   if (opts.virtFolder && opts.virtRoot) {
-    fm.push(`up: [[${opts.virtRoot}]]`, 'Folders:', `  - "[[${opts.virtRoot}]]"`);
+    fm.push(`up: "[[${opts.virtRoot}]]"`, 'Folders:', `  - "[[${opts.virtRoot}]]"`);
   }
   fm.push('---');
   const body = [
